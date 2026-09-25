@@ -4,7 +4,7 @@
 FROM dunglas/frankenphp:php8.4
 
 # Links the GHCR package page to this repository.
-LABEL org.opencontainers.image.source="https://github.com/OWNER/universal-runtime" \
+LABEL org.opencontainers.image.source="https://github.com/mhraymondwong/universal-runtime" \
       org.opencontainers.image.description="FrankenPHP PHP 8.4 runtime for Laravel 13 + Filament 5 apps"
 
 # PHP extensions required by Laravel 13 + Filament 5 + PostgreSQL.

@@ -32,7 +32,7 @@ This image contains **infrastructure only** — no application code, no `.env` s
 git init
 git add -A
 git commit -m "Initial commit"
-git remote add origin git@github.com:<your-user>/universal-runtime.git
+git remote add origin git@github.com:mhraymondwong/universal-runtime.git
 git push -u origin main
 ```
 
@@ -51,14 +51,14 @@ The workflow `.github/workflows/build-publish.yml` builds both architectures, sm
 
 The first publish creates the package as private. To make it public:
 
-1. Go to `https://github.com/<your-user>?tab=packages` → select `universal-runtime`.
+1. Go to `https://github.com/mhraymondwong?tab=packages` → select `universal-runtime`.
 2. **Package settings** → **Danger Zone** → **Change visibility** → **Public**.
 3. Also under **Package settings → Connect repository**, link this repo so the README renders on the package page.
 
 Customers can then pull without authentication:
 
 ```bash
-docker pull ghcr.io/<your-user>/universal-runtime:php8.4
+docker pull ghcr.io/mhraymondwong/universal-runtime:php8.4
 ```
 
 ## Using the image (customer deployment)
@@ -74,7 +74,7 @@ app/                    # extracted from business-app.tar.gz
 ```yaml
 services:
   app:
-    image: ghcr.io/<your-user>/universal-runtime:php8.4
+    image: ghcr.io/mhraymondwong/universal-runtime:php8.4
     restart: unless-stopped
     environment:
       SERVER_NAME: ":80"            # HTTP. Use a domain for auto-HTTPS + publish 443.

@@ -1,7 +1,6 @@
 # Consumer deployment example — Laravel 13 + Filament 5 app on universal-runtime.
 #
-# Replace every "OWNER" below with the GitHub user/org that owns the
-# ghcr.io universal-runtime package (e.g. ghcr.io/acme/universal-runtime).
+# Image: ghcr.io/mhraymondwong/universal-runtime — fork/adapt as needed.
 #
 # Expected layout on the customer machine:
 #   ./docker-compose.yml   (this file)
@@ -32,7 +31,7 @@ x-app-volumes: &app-volumes
 
 services:
   app:
-    image: ghcr.io/OWNER/universal-runtime:php8.4
+    image: ghcr.io/mhraymondwong/universal-runtime:php8.4
     restart: unless-stopped
     environment: *app-env
     volumes: *app-volumes
@@ -45,7 +44,7 @@ services:
         condition: service_healthy
 
   queue:
-    image: ghcr.io/OWNER/universal-runtime:php8.4
+    image: ghcr.io/mhraymondwong/universal-runtime:php8.4
     restart: unless-stopped
     command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
     environment: *app-env
@@ -55,7 +54,7 @@ services:
         condition: service_healthy
 
   scheduler:
-    image: ghcr.io/OWNER/universal-runtime:php8.4
+    image: ghcr.io/mhraymondwong/universal-runtime:php8.4
     restart: unless-stopped
     command: php artisan schedule:work
     environment: *app-env
