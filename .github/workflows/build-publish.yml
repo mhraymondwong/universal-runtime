@@ -1,0 +1,90 @@
+name: Build & Publish Runtime Image
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: universal-runtime
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # GHCR requires lowercase image paths; owner names may contain capitals.
+      - name: Resolve image name
+        run: |
+          echo "IMAGE_NAME=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_BASE }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=php8.4
+            type=raw,value=latest
+            type=semver,pattern=php8.4-v{{version}}
+            type=raw,value=php8.4-dev,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=sha,prefix=sha-,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      # Gate: build for the runner's native arch and verify the runtime
+      # before anything is pushed to the registry.
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: universal-runtime:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: |
+          docker run --rm universal-runtime:test sh -c '
+            set -e
+            php -v
+            frankenphp version
+            composer --version
+            for ext in pdo_pgsql pgsql intl gd zip pcntl bcmath redis; do
+              php -m | grep -qi "^${ext}$" || { echo "MISSING EXTENSION: ${ext}"; exit 1; }
+            done
+            # OPcache loads as a Zend extension: php -m lists it as "Zend OPcache".
+            php -m | grep -qi "opcache" || { echo "MISSING EXTENSION: opcache"; exit 1; }
+            echo "Smoke test passed: PHP 8.4 + FrankenPHP + Composer + all extensions OK"
+          '
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

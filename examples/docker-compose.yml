@@ -1,0 +1,83 @@
+# Consumer deployment example — Laravel 13 + Filament 5 app on universal-runtime.
+#
+# Replace every "OWNER" below with the GitHub user/org that owns the
+# ghcr.io universal-runtime package (e.g. ghcr.io/acme/universal-runtime).
+#
+# Expected layout on the customer machine:
+#   ./docker-compose.yml   (this file)
+#   ./.env                 (customer-edited secrets — copy from .env.example)
+#   ./app/                 (extracted from business-app.tar.gz: source + vendor/ + built assets)
+#
+# Deploy:  docker compose up -d
+# Migrate: docker compose exec app php artisan migrate --force
+
+x-app-env: &app-env
+  SERVER_NAME: ":80"                # HTTP on port 80. For a public domain with auto-HTTPS,
+                                    # set SERVER_NAME: "app.example.com" and publish 443:443.
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: ${APP_URL:-http://localhost}
+  DB_CONNECTION: pgsql
+  DB_HOST: db
+  DB_PORT: 5432
+  DB_DATABASE: ${DB_DATABASE:-app}
+  DB_USERNAME: ${DB_USERNAME:-app}
+  DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+  CACHE_STORE: ${CACHE_STORE:-database}
+  QUEUE_CONNECTION: ${QUEUE_CONNECTION:-database}
+  SESSION_DRIVER: ${SESSION_DRIVER:-database}
+
+x-app-volumes: &app-volumes
+  - ./app:/app
+
+services:
+  app:
+    image: ghcr.io/OWNER/universal-runtime:php8.4
+    restart: unless-stopped
+    environment: *app-env
+    volumes: *app-volumes
+    ports:
+      - "80:80"
+      # - "443:443"               # uncomment when using a public domain (auto-HTTPS)
+      # - "443:443/udp"           # HTTP/3
+    depends_on:
+      db:
+        condition: service_healthy
+
+  queue:
+    image: ghcr.io/OWNER/universal-runtime:php8.4
+    restart: unless-stopped
+    command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+    environment: *app-env
+    volumes: *app-volumes
+    depends_on:
+      db:
+        condition: service_healthy
+
+  scheduler:
+    image: ghcr.io/OWNER/universal-runtime:php8.4
+    restart: unless-stopped
+    command: php artisan schedule:work
+    environment: *app-env
+    volumes: *app-volumes
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-app}
+      POSTGRES_USER: ${DB_USERNAME:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
