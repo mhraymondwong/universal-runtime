@@ -24,7 +24,9 @@ downstream apps and their deployed clients. Obey these contracts.
   major image tag AND a `CHANGELOG.md` entry. Adding new optional vars with
   defaults is safe.
 - **Tags.** Backup image: `pg<N>` moving + `pg<N>-vX.Y.Z` immutable — never
-  publish `latest`. Runtime image: `php8.4`, `latest`, `php8.4-vX.Y.Z`.
+  publish `latest` (in metadata-action steps this requires
+  `flavor: latest=false`; the default `latest=auto` adds it on tag pushes).
+  Runtime image: `php8.4`, `latest`, `php8.4-vX.Y.Z`.
   Releases share `v*.*.*` git tags (one tag releases both images).
 - **Scheduling.** Busybox `crond` only — never `dcron` (its `setpgid()` call
   fails as PID 1 in containers). `BACKUP_CRON` + `TZ` drive the schedule.
