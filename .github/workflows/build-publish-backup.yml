@@ -53,6 +53,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
+          # `latest` is never published for this image — disable the
+          # metadata-action default that adds it on tag pushes.
+          flavor: latest=false
           tags: |
             type=raw,value=pg17,enable=${{ github.ref_type == 'branch' || github.ref_type == 'tag' }}
             type=semver,pattern=pg17-v{{version}}
