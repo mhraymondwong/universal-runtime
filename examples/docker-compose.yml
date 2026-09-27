@@ -63,6 +63,34 @@ services:
       db:
         condition: service_healthy
 
+  backup:
+    image: ghcr.io/mhraymondwong/universal-backup:pg17
+    restart: unless-stopped
+    environment:
+      DB_HOST: db                        # this stack's Postgres service name
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-app}
+      DB_USERNAME: ${DB_USERNAME:-app}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      BACKUP_CRON: "${BACKUP_CRON:-0 3 * * *}"
+      TZ: ${TZ:-UTC}
+      BACKUP_PATHS: ${BACKUP_PATHS:-/app/storage}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-backups}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+    volumes:
+      - backups:/backups
+      - ./app/storage:/app/storage:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -80,3 +108,4 @@ services:
 
 volumes:
   pgdata:
+  backups:

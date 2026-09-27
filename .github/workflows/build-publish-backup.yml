@@ -1,0 +1,157 @@
+name: Build & Publish Backup Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+    paths:
+      - 'backup/**'
+      - '.github/workflows/build-publish-backup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: universal-backup
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # GHCR requires lowercase image paths; owner names may contain capitals.
+      - name: Resolve image name
+        run: |
+          echo "IMAGE_NAME=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_BASE }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag contract for universal-backup:
+      #   pg17          moving tag — main pushes and releases (never `latest`)
+      #   pg17-vX.Y.Z   immutable — git tag vX.Y.Z
+      #   pg17-dev, sha-* — manual workflow_dispatch runs only
+      - name: Extract image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=pg17,enable=${{ github.ref_type == 'branch' || github.ref_type == 'tag' }}
+            type=semver,pattern=pg17-v{{version}}
+            type=raw,value=pg17-dev,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=sha,prefix=sha-,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      # Gate: build for the runner's native arch and verify the image
+      # against a real Postgres before anything is pushed to the registry.
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backup
+          platforms: linux/amd64
+          load: true
+          tags: universal-backup:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: |
+          set -e
+          WORK="$RUNNER_TEMP/backup-test"
+          mkdir -p "$WORK/backups" "$WORK/storage/nested"
+          echo "seed-data" > "$WORK/storage/nested/file.txt"
+
+          docker network create backup-test-net
+          docker run -d --name pg --network backup-test-net --network-alias postgres \
+            -e POSTGRES_DB=appdb \
+            -e POSTGRES_USER=appuser \
+            -e POSTGRES_PASSWORD=testpass \
+            postgres:17-alpine
+
+          echo "waiting for postgres"
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U appuser -d appdb >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec pg pg_isready -U appuser -d appdb
+
+          docker run -d --name backup --network backup-test-net \
+            -e BACKUP_RUN_ON_START=true \
+            -e DB_HOST=postgres -e DB_PORT=5432 \
+            -e DB_DATABASE=appdb -e DB_USERNAME=appuser -e DB_PASSWORD=testpass \
+            -v "$WORK/backups:/backups" \
+            -v "$WORK/storage:/app/storage:ro" \
+            universal-backup:test
+
+          echo "waiting for on-start backup to finish"
+          for i in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Running}}' backup)" != "true" ]; then
+              docker logs backup
+              echo "backup container exited unexpectedly"
+              exit 1
+            fi
+            ls "$WORK/backups"/db-*.sql.gz >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          DUMP=$(ls "$WORK/backups"/db-*.sql.gz | head -1)
+          [ -s "$DUMP" ] || { echo "dump is empty"; docker logs backup; exit 1; }
+          gunzip -t "$DUMP"
+          echo "dump OK: $DUMP"
+
+          STORE=$(ls "$WORK/backups"/storage-*.tar.gz | head -1)
+          [ -n "$STORE" ] || { echo "no storage archive"; exit 1; }
+          tar -tzf "$STORE" | grep -q 'nested/file.txt'
+          echo "storage archive OK: $STORE"
+
+          echo "waiting for image HEALTHCHECK to report healthy"
+          for i in $(seq 1 90); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' backup)
+            [ "$STATUS" = "healthy" ] && break
+            sleep 2
+          done
+          [ "$STATUS" = "healthy" ] || { echo "container not healthy: $STATUS"; exit 1; }
+
+          echo "negative test: wrong DB password must fail and leave nothing"
+          BEFORE=$(find "$WORK/backups" -type f | wc -l)
+          if docker exec -e DB_PASSWORD=wrong backup backup.sh; then
+            echo "backup.sh unexpectedly succeeded with a bad password"
+            exit 1
+          fi
+          AFTER=$(find "$WORK/backups" -type f | wc -l)
+          [ "$BEFORE" = "$AFTER" ] || { echo "failed run left files behind"; find "$WORK/backups" -type f; exit 1; }
+          if find "$WORK/backups" -name '*.tmp' | grep -q .; then
+            echo "leftover .tmp file found"
+            exit 1
+          fi
+
+          docker logs backup
+          echo "Smoke test passed: dump + archive + healthcheck + failure-path OK"
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backup
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
